@@ -42,18 +42,18 @@ https://www.adafruit.com/product/2130
 
 - Ground
 - Power - 3.3V
-- TX - GPIO ? (DEFAULT TX)
-- RX - GPIO ? (DEFAULT RX)
-- RESET - GPIO ?
+- TX - GPIO 6 (DEFAULT TX)
+- RX - GPIO 7 (DEFAULT RX)
+- RESET - GPIO 8
 - UG - GROUND
 
 ## Amplifier
 
 - Ground
 - Power: 3.3V
-- AUDIO IN +: ?
-- AUDIO IN -: ?
-- SHUTDOWN: ?
+- AUDIO IN +: Audio Board R channel
+- AUDIO IN -: Audio Board Gnd channel
+- SHUTDOWN: NOT CONNECTED (for now?)
 
 
 # Known issues:

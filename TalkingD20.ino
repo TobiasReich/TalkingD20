@@ -7,6 +7,8 @@
 #define SFX_RX 7
 #define SFX_RST 8
 
+/* Note: This is software serial only for now until I figure out why this is not working.
+I guess I might be missing something simple here but I'm not sure yet, what it is.  */
 SoftwareSerial ss = SoftwareSerial(SFX_TX, SFX_RX);   // <---- this worked, hardware did not?!
 
 Adafruit_Soundboard sfx = Adafruit_Soundboard(&ss, NULL, SFX_RST);
