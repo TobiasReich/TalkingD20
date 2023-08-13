@@ -43,6 +43,12 @@ https://www.adafruit.com/product/2133
 Amplifier:
 https://www.adafruit.com/product/2130
 
+## Libraries
+
+Seedstudio seems to have it's own LSM6DS3 library for the IMU of the device:
+
+https://github.com/Seeed-Studio/Seeed_Arduino_LSM6DS3
+
 
 # Pinouts (for now)
 
