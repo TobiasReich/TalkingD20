@@ -23,6 +23,14 @@ More info about the used nRF52840 can be found here:
 
 https://wiki.seeedstudio.com/XIAO_BLE/
 
+which has a pinout as specified here:
+
+![Pinout](doc/nRF52840-Sense-Pinout.png "Pinout")
+
+The schematics look currently like that:
+![Schematics](doc/project-schema.png "Schematics")
+
+
 
 ## Devices
 
