@@ -14,7 +14,7 @@
 #define SFX_RX 7
 #define SFX_RST 8
 
-#define AUDIO_ACT 4  // "Act" on Audio FX -> Used for checking whether there is some audio playing
+#define AUDIO_ACT_PIN 5  // "Act" on Audio FX -> Used for checking whether there is some audio playing
 
 /* Note: This is software serial only for now until I figure out why this is not working.
 I guess I might be missing something simple here but I'm not sure yet, what it is.  */
@@ -24,14 +24,14 @@ Adafruit_Soundboard sfx = Adafruit_Soundboard(&ss, NULL, SFX_RST);
 
 char filename[12] = "        OGG";  // Tail end of filename NEVER changes
 
-// PROGMEM string arrays are wretched, and sfx.playTrack() expects a
+// string arrays are wretched, and sfx.playTrack() expects a
 // goofball fixed-length space-padded filename...we take care of both by
-// declaring all the filenames inside one big contiguous PROGMEM string
+// declaring all the filenames inside one big contiguous string
 // (notice there are no commas here, it's all concatenated), and copying
 // an 8-byte section as needed into filename[].  Some waste, but we're
 // not hurting for space.  If you change or add any filenames, they MUST
 // be padded with spaces to 8 characters, else there will be...trouble.
-static const char PROGMEM bigStringTable[] =  // play() index
+static const char bigStringTable[] =  // play() index
   "01      "
   "02      "
   "03      "
@@ -67,34 +67,36 @@ static const char PROGMEM bigStringTable[] =  // play() index
   "BATT2   ";  // 29-32
 
 
-
 void audioOn(void) {
   //pinMode(AMP_SHUTDOWN, INPUT_PULLUP);
-  //pinMode(AUDIO_RESET , INPUT_PULLUP);
+  pinMode(SFX_RST , INPUT_PULLUP);
   Serial.println("Audio ON (TODO)");
 }
 
 void audioOff(void) {
   //digitalWrite(AMP_SHUTDOWN, LOW);
   //pinMode(     AMP_SHUTDOWN, OUTPUT);
-  //digitalWrite(AUDIO_RESET , LOW); // Hold low = XRESET (low power)
-  //pinMode(     AUDIO_RESET , OUTPUT);
+  digitalWrite(SFX_RST , LOW); // Hold low = XRESET (low power)
+  pinMode(SFX_RST, OUTPUT);
   Serial.println("Audio OFF (TODO)");
 }
 
 /* Plays the track defined in the array above */
 void play(uint16_t i) {
-  //sfx.playTrack(1);
-  //sfx.playTrack("T00     OGG");
-
-  /*memcpy_P(filename, &bigStringTable[i * 8], 8);
-
-    sfx.playTrack(filename);
-    delay(250); // Need this -- some delay before ACT LED is valid
-    while(digitalRead(AUDIO_ACT) == LOW);  // Wait for sound to finish
-  */
   Serial.print("Playing Track (TODO): ");
   Serial.println(i);
+
+  memcpy_P(filename, &bigStringTable[i * 8], 8);
+
+  Serial.print("Playing Filename: ");
+  Serial.println(filename);
+
+  sfx.playTrack(filename);
+  delay(250); // Need this -- some delay before ACT LED is valid
+
+  while(analogRead(AUDIO_ACT_PIN) < 500);  // Wait for sound to finish
+  //while(digitalRead(AUDIO_ACT) == LOW);  // Wait for sound to finish
+  Serial.print("Playing audio track finished!");
 }
 
 
@@ -269,6 +271,10 @@ static uint16_t readVoltage() {
 void setupAudio() {
   pinMode(SFX_TX, OUTPUT);
   pinMode(SFX_RX, INPUT);
+  
+  pinMode(AUDIO_ACT_PIN, INPUT);
+  //pinMode(AUDIO_ACT_PIN, INPUT_PULLDOWN_SENSE);
+  //pinMode(AUDIO_ACT_PIN, INPUT_PULLUP_SENSE);
 
   ss.begin(9600);
   if (!sfx.reset()) {
@@ -388,6 +394,7 @@ void onFreefallDetected() {
     Then it notifies the user */
 void estimateSideAndNotify() {
   Serial.println("Waiting to stabilize");
+  audioOn();
 
   if (stabilize()) {
     uint8_t f = getFace();
@@ -412,6 +419,9 @@ void estimateSideAndNotify() {
       play(31 + random(2));
     }
   }
+  audioOff();
+
+  Serial.println("estimateSideAndNotify() - done!");
 }
 
 
@@ -423,13 +433,13 @@ void setup() {
   while (!Serial) { ; }
   Serial.println("\nSTART PROGRAM");
 
-  //setupAudio();
+  setupAudio();
   setupIMU();
 }
 
 
 void loop() {
-  //Serial.print("."); // Health check
+  Serial.print("."); // Health check
   
   // Semaphore so we don't trigger it multiple times
   if (wasThrown && !calculatingResult) {
