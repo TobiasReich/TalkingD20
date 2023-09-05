@@ -271,10 +271,7 @@ static uint16_t readVoltage() {
 void setupAudio() {
   pinMode(SFX_TX, OUTPUT);
   pinMode(SFX_RX, INPUT);
-  
   pinMode(AUDIO_ACT_PIN, INPUT);
-  //pinMode(AUDIO_ACT_PIN, INPUT_PULLDOWN_SENSE);
-  //pinMode(AUDIO_ACT_PIN, INPUT_PULLUP_SENSE);
 
   ss.begin(9600);
   if (!sfx.reset()) {
