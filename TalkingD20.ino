@@ -2,15 +2,10 @@
 #include "Adafruit_TinyUSB.h"
 #include <SoftwareSerial.h>
 #include <HardwareSerial.h>
-#include <limits.h> // required for LONG_MAX etc.
+#include <limits.h>  // required for LONG_MAX etc.
 
 #include "LSM6DS3.h"
-//#include "Wire.h"
 #include <Wire.h>
-
-
-
-
 
 
 // ---------------- Sound ----------------
@@ -19,16 +14,15 @@
 #define SFX_RX 7
 #define SFX_RST 8
 
-#define AUDIO_ACT     4 // "Act" on Audio FX -> Used for checking whether there is some audio playing
+#define AUDIO_ACT 4  // "Act" on Audio FX -> Used for checking whether there is some audio playing
 
 /* Note: This is software serial only for now until I figure out why this is not working.
 I guess I might be missing something simple here but I'm not sure yet, what it is.  */
-SoftwareSerial ss = SoftwareSerial(SFX_TX, SFX_RX);   // <---- this worked, hardware did not?!
+SoftwareSerial ss = SoftwareSerial(SFX_TX, SFX_RX);  // <---- this worked, hardware did not?!
 
 Adafruit_Soundboard sfx = Adafruit_Soundboard(&ss, NULL, SFX_RST);
 
-
-char filename[12] = "        OGG"; // Tail end of filename NEVER changes
+char filename[12] = "        OGG";  // Tail end of filename NEVER changes
 
 // PROGMEM string arrays are wretched, and sfx.playTrack() expects a
 // goofball fixed-length space-padded filename...we take care of both by
@@ -36,17 +30,41 @@ char filename[12] = "        OGG"; // Tail end of filename NEVER changes
 // (notice there are no commas here, it's all concatenated), and copying
 // an 8-byte section as needed into filename[].  Some waste, but we're
 // not hurting for space.  If you change or add any filenames, they MUST
-// be padded with spaces to 8 characters, else there will be...trouble.  
-static const char PROGMEM bigStringTable[] =   // play() index
-  "01      " "02      " "03      " "04      "  //  0- 3
-  "05      " "06      " "07      " "08      "  //  4- 7
-  "09      " "10      " "11      " "12      "  //  8-11
-  "13      " "14      " "15      " "16      "  // 12-15
-  "17      " "18      " "19      " "20      "  // 16-19
-  "ANNC1   " "ANNC2   " "ANNC3   "             // 20-22
-  "BAD1    " "BAD2    " "BAD3    "             // 23-25
-  "GOOD1   " "GOOD2   " "GOOD3   "             // 26-28
-  "STARTUP " "03ALT   " "BATT1   " "BATT2   "; // 29-32
+// be padded with spaces to 8 characters, else there will be...trouble.
+static const char PROGMEM bigStringTable[] =  // play() index
+  "01      "
+  "02      "
+  "03      "
+  "04      "  //  0- 3
+  "05      "
+  "06      "
+  "07      "
+  "08      "  //  4- 7
+  "09      "
+  "10      "
+  "11      "
+  "12      "  //  8-11
+  "13      "
+  "14      "
+  "15      "
+  "16      "  // 12-15
+  "17      "
+  "18      "
+  "19      "
+  "20      "  // 16-19
+  "ANNC1   "
+  "ANNC2   "
+  "ANNC3   "  // 20-22
+  "BAD1    "
+  "BAD2    "
+  "BAD3    "  // 23-25
+  "GOOD1   "
+  "GOOD2   "
+  "GOOD3   "  // 26-28
+  "STARTUP "
+  "03ALT   "
+  "BATT1   "
+  "BATT2   ";  // 29-32
 
 
 
@@ -66,6 +84,9 @@ void audioOff(void) {
 
 /* Plays the track defined in the array above */
 void play(uint16_t i) {
+  //sfx.playTrack(1);
+  //sfx.playTrack("T00     OGG");
+
   /*memcpy_P(filename, &bigStringTable[i * 8], 8);
 
     sfx.playTrack(filename);
@@ -77,126 +98,131 @@ void play(uint16_t i) {
 }
 
 
-
 // ---------------- ACCELEROMETER ----------------
 
-//Instance of class LSM6DS3 of the nRF52840
-LSM6DS3 myIMU(I2C_MODE, 0x6A);    //I2C device address 0x6A
+volatile boolean wasThrown = false;
+boolean calculatingResult = false;
+
+/** defines how different the values might be that we still consider
+    The die to be stable (e.g. if the table is still shaking or the 
+    die is held in a hand) */
+#define STABILIZE_DELTA 0.01
+#define int1Pin PIN_LSM6DS3TR_C_INT1
+
+/* How many millis to wait, longer values allow the die
+   to roll further but increase the risk of false positives */
+#define STABILIZE_TIMEOUT 3000
+
+/* How many millis does the die have to stand still before it's
+   motion is considered finished. Higher values prevent false
+   positives (e.g. when the die is just paused but continues to roll)
+   but lets you wait longer for the result */
+#define STABILIZE_THRESHOLD 200
+
+//Instance of LSM6DS3 of the nRF52840
+LSM6DS3 myIMU(I2C_MODE, 0x6A);  //I2C device address 0x6A
 
 
 // Waits for accelerometer output to stabilize, indicating movement stopped
-boolean stabilize(uint32_t ms, uint32_t timeout) {
+boolean stabilize() {
+  Serial.print("Stabilizing... ");
+
   uint32_t startTime, prevTime, currentTime;
-  int32_t  prevX, prevY, prevZ;
-  int32_t  dX, dY, dZ;
+  float_t prevX, prevY, prevZ;
+  float_t dX, dY, dZ;
 
   // Get initial orientation and time
-  prevX    = myIMU.readFloatAccelX();
-  prevY    = myIMU.readFloatAccelY();
-  prevZ    = myIMU.readFloatAccelZ();
+  prevX = myIMU.readFloatAccelX();
+  prevY = myIMU.readFloatAccelY();
+  prevZ = myIMU.readFloatAccelZ();
   prevTime = startTime = millis();
 
   // Then make repeated readings until orientation settles down.
   // A normal roll should only take a second or two...if things do not
   // stabilize before timeout, probably being moved or carried.
-  while(((currentTime = millis()) - startTime) < timeout) {
-    if((currentTime - prevTime) >= ms) return true; // Stable!
-    dX = myIMU.readFloatAccelX() - prevX; // X/Y/Z delta from last stable position
+  while (((currentTime = millis()) - startTime) < STABILIZE_TIMEOUT) {
+    delay(10); // no need to check this too often -> conserves some energy
+
+    if ((currentTime - prevTime) >= STABILIZE_THRESHOLD) {
+      Serial.println("Stable!");
+      return true;  // Stable!
+    }
+
+    // compare with the last orientation check
+    dX = myIMU.readFloatAccelX() - prevX;
     dY = myIMU.readFloatAccelY() - prevY;
     dZ = myIMU.readFloatAccelZ() - prevZ;
-    // Compare distance.  sqrt() can be avoided by squaring distance
-    // to be compared; about 100 units on X+Y+Z axes ((100^2)*3 = 30K)
-    if((dX * dX + dY * dY + dZ * dZ) >= 30000) { // Big change?
-      prevX    = myIMU.readFloatAccelX();    // Save new position
-      prevY    = myIMU.readFloatAccelY();
-      prevZ    = myIMU.readFloatAccelZ();
-      prevTime = millis(); // Reset timer
+
+    // This compares the distance. sqrt() can be avoided by squaring distance
+    // to be compared. i.e. X²+Y²+Z² ...
+    if ((dX * dX + dY * dY + dZ * dZ) >= STABILIZE_DELTA) {  
+      prevX = myIMU.readFloatAccelX();
+      prevY = myIMU.readFloatAccelY();
+      prevZ = myIMU.readFloatAccelZ();
+      prevTime = millis();  // Reset timer for the next check
     }
   }
-
-  return false; // Didn't stabilize, probably false trigger
+  Serial.println("Still rolling!");
+  return false;  // Didn't stabilize, probably false trigger
 }
 
-// Face gravity vectors (accelerometer installed FACE DOWN)
-// Note the original values for the MMA8451 were 14 bit (until 4096)
-// but since this IMU gives me -1..1 values I have to divide it by 4096
+
+/* Face gravity vectors (accelerometer installed FACE DOWN)
+ * Note the original values for the MMA8451 were 14 bit (until 4096)
+ * but since this IMU gives me -1..1 values I have to divide it by 4096 */
 static const float_t gtable[20][3] = {
-  {  0.362, -0.476,  0.784 }, //  1
-  { -0.590,  0.804, -0.189 }, //  2
-  {  0.906, -0.286  -0.194 }, //  3
-  { -0.935, -0.274, -0.224 }, //  4
-  { -0.595,  0.213,  0.758 }, //  5
-  { -0.012, -0.584, -0.797 }, //  6
-  {  0.559,  0.187,  0.783 }, //  7
-  {  0.336,  0.513, -0.787 }, //  8
-  {  0.001, -0.975, -0.206 }, //  9
-  {  0.561,  0.808, -0.169 }, // 10
-  { -0.762, -0.778,  0.148 }, // 11
-  { -0.006,  0.987,  0.203 }, // 12
-  { -0.369, -0.495,  0.771 }, // 13
-  { -0.592, -0.162, -0.793 }, // 14
-  { -0.015,  0.603,  0.784 }, // 15
-  {  0.551, -0.196, -0.781 }, // 16
-  {  0.913,  0.292,  0.189 }, // 17
-  { -0.932,  0.312,  0.174 }, // 18
-  {  0.545, -0.793,  0.191 }, // 19
-  { -0.391,  0.507, -0.789 }  // 20
+  { 0.362, -0.476, 0.784 },    //  1
+  { -0.590, 0.804, -0.189 },   //  2
+  { 0.906, -0.286 - 0.194 },   //  3
+  { -0.935, -0.274, -0.224 },  //  4
+  { -0.595, 0.213, 0.758 },    //  5
+  { -0.012, -0.584, -0.797 },  //  6
+  { 0.559, 0.187, 0.783 },     //  7
+  { 0.336, 0.513, -0.787 },    //  8
+  { 0.001, -0.975, -0.206 },   //  9
+  { 0.561, 0.808, -0.169 },    // 10
+  { -0.762, -0.778, 0.148 },   // 11
+  { -0.006, 0.987, 0.203 },    // 12
+  { -0.369, -0.495, 0.771 },   // 13
+  { -0.592, -0.162, -0.793 },  // 14
+  { -0.015, 0.603, 0.784 },    // 15
+  { 0.551, -0.196, -0.781 },   // 16
+  { 0.913, 0.292, 0.189 },     // 17
+  { -0.932, 0.312, 0.174 },    // 18
+  { 0.545, -0.793, 0.191 },    // 19
+  { -0.391, 0.507, -0.789 }    // 20
 };
 
-/* // Old face values stored in 14 bit
-static const int16_t PROGMEM gtable[20][3] = {
-  {  1475, -1950,  3215 }, //  1
-  { -2420,  3295,  -775 }, //  2
-  {  3715, -1175   -795 }, //  3
-  { -3830, -1125,  -920 }, //  4
-  { -2440,   875,  3105 }, //  5
-  {   -50, -2395, -3265 }, //  6
-  {  2290,   770,  3210 }, //  7
-  {  1380,  2105, -3225 }, //  8
-  {    50, -3995,  -845 }, //  9
-  {  2300,  3310,  -695 }, // 10
-  { -2430, -3190,   610 }, // 11
-  {   -25,  4045,   835 }, // 12
-  { -1515, -2030,  3160 }, // 13
-  { -2425,  -665, -3250 }, // 14
-  {   -65,  2470,  3215 }, // 15
-  {  2260,  -805, -3200 }, // 16
-  {  3740,  1200,   775 }, // 17
-  { -3820,  1280,   715 }, // 18
-  {  2235, -3250,   785 }, // 19
-  { -1605,  2080, -3235 }  // 20
-};
-*/
 
-// Find nearest face to accelerometer reading.
+/* Find nearest face to accelerometer reading. */
 uint8_t getFace(void) {
-  float  dX, dY, dZ, d, dMin = INT_MAX;
-  float  fX, fY, fZ;
-  uint8_t  i, iMin = 0;
+  float dX, dY, dZ, d, dMin = INT_MAX;
+  float fX, fY, fZ;
+  uint8_t i, iMin = 0;
 
-  for(i=0; i<20; i++) { // For each face...
-    fX = gtable[i][0]; // Read face X/Y/Z
-    fY = gtable[i][1]; // from PROGMEM
+  for (i = 0; i < 20; i++) {  // For each face...
+    fX = gtable[i][0];        // Read face X/Y/Z
+    fY = gtable[i][1];        // from PROGMEM
     fZ = gtable[i][2];
-    dX = myIMU.readFloatAccelX() - fX; // Delta between accelerometer & face
+    dX = myIMU.readFloatAccelX() - fX;  // Delta between accelerometer & face
     dY = myIMU.readFloatAccelY() - fY;
     dZ = myIMU.readFloatAccelZ() - fZ;
-    d  = dX * dX + dY * dY + dZ * dZ; // Distance^2
+    d = dX * dX + dY * dY + dZ * dZ;  // Distance^2
     // Check if this face is the closest match so far.  Because
     // we're comparing RELATIVE distances, sqrt() can be avoided.
-    if(d < dMin) { // New closest match?
-      dMin = d;    // Save closest distance^2
-      iMin = i;    // Save index of closest match
+    if (d < dMin) {  // New closest match?
+      dMin = d;      // Save closest distance^2
+      iMin = i;      // Save index of closest match
     }
   }
 
-  return iMin; // Index of closest matching face
+  return iMin;  // Index of closest matching face
 }
 
 
 // ---------------- POWER SAVING STUFF ----------------
 
-uint8_t batt = 0; // Low battery announcement counter
+uint8_t batt = 0;  // Low battery announcement counter
 
 // This will be required in order to disable everything until the "fall detection"
 // causes an interrupt
@@ -230,7 +256,7 @@ static uint16_t readVoltage() {
   ADCSRA = 0; // ADC off
   power_adc_disable();
   return mV; */
-  return 3500; // TODO: mocked for now until I check the voltage
+  return 3500;  // TODO: mocked for now until I check the voltage
 }
 
 
@@ -240,14 +266,15 @@ static uint16_t readVoltage() {
 
 
 
-void setupAudio(){
+void setupAudio() {
   pinMode(SFX_TX, OUTPUT);
   pinMode(SFX_RX, INPUT);
- 
+
   ss.begin(9600);
   if (!sfx.reset()) {
     Serial.println("Not found. Waiting...");
-    while (!ss) { /* wait until it is connected*/ }
+    while (!ss) { /* wait until it is connected*/
+    }
   }
   Serial.println("SFX board found");
   delay(1000);
@@ -255,94 +282,177 @@ void setupAudio(){
   Serial.println("File Listing");
   Serial.println("========================");
   Serial.println();
-  Serial.print("Found "); Serial.print(files); Serial.println(" Files");
-  for (uint8_t f=0; f<files; f++) {
-    Serial.print(f); 
-    Serial.print("\tname: "); Serial.print(sfx.fileName(f));
-    Serial.print("\tsize: "); Serial.println(sfx.fileSize(f));
+  Serial.print("Found ");
+  Serial.print(files);
+  Serial.println(" Files");
+  for (uint8_t f = 0; f < files; f++) {
+    Serial.print(f);
+    Serial.print("\tname: ");
+    Serial.print(sfx.fileName(f));
+    Serial.print("\tsize: ");
+    Serial.println(sfx.fileSize(f));
   }
-  Serial.println("========================"); 
+  Serial.println("========================");
 }
 
-void setupIMU(){
-  Serial.println("starting IMU...");
+void setupIMU() {
+  Serial.println("(re)starting IMU...");
 
-  // We only need the accelerometer
-  myIMU.settings.gyroEnabled = false;
-  myIMU.settings.tempEnabled = false;
-  myIMU.settings.accelEnabled = true;
+  myIMU.settings.accelEnabled = 1;
+  myIMU.settings.tempEnabled = 0;
+  myIMU.settings.gyroEnabled = 0;  // Gyro currently not used, disabled to save power
 
   if (myIMU.begin() != 0) {
-      Serial.println("Device error");
+    Serial.println("IMU error");
   } else {
-      Serial.println("Device OK!");
+    Serial.println("IMU OK!");
   }
 
-  Serial.println("IMU started!");
+  setupFreeFallInterrupt();
+  pinMode(int1Pin, INPUT);
+  attachInterrupt(digitalPinToInterrupt(int1Pin), onFreefallDetected, RISING);
+
+  Serial.println("IMU setup finished!");
 }
 
 
-void setup() {
-  Serial.begin(115200); 
-  
-  setupAudio();
+void setupFreeFallInterrupt() {
+  Serial.println("Setup for Free-Fall Interrupt");
 
-  setupIMU();
+  uint8_t error = 0;
+  uint8_t dataToWrite = 0;
+
+  dataToWrite |= LSM6DS3_ACC_GYRO_BW_XL_50Hz;   // 0000 0001  200Hz
+  dataToWrite |= LSM6DS3_ACC_GYRO_FS_XL_2g;      // 0000 0000  2g
+  dataToWrite |= LSM6DS3_ACC_GYRO_ODR_XL_52Hz;  // 0100 0000  104Hz
+
+  error += myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL1_XL, dataToWrite);
+  error += myIMU.writeRegister(LSM6DS3_ACC_GYRO_WAKE_UP_SRC, 0b00100000);
+  error += myIMU.writeRegister(LSM6DS3_ACC_GYRO_TAP_CFG1, 0x81);       // LATCHED
+  error += myIMU.writeRegister(LSM6DS3_ACC_GYRO_MD1_CFG, 0b00010000);  // 00010000
+  error += myIMU.writeRegister(LSM6DS3_ACC_GYRO_WAKE_UP_DUR, 0b00000000);
+
+  /*Documentation states:
+    In the LSM6DS3, the accelerometer can be configured in four different operating modes:
+    power-down, low-power, normal mode and high-performance mode. The operating mode
+    selected depends on the value of the XL_HM_MODE bit in CTRL6_C (15h). If
+    XL_HM_MODE is set to ‘0’, high-performance mode is valid for all ODRs (from 12.5 Hz up
+    to 6.66 kHz).
+    To enable the low-power and normal mode, the XL_HM_MODE bit has to be set to ‘1’. Low-
+    power mode is available for lower ODRs (12.5, 26, 52 Hz) while normal mode is available
+    for ODRs equal to 104 and 208 Hz. */
+  // Switch to low-power mode (or normal mode if 104Hz or higher)
+  error += myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL6_G, 0b00010000);
+
+
+  // p.80 ->
+  // Time and threshold for the
+  // 00011 : 3 events (@52Hz = 57ms)
+  // 011 : 312 mg threshold
+  error += myIMU.writeRegister(LSM6DS3_ACC_GYRO_FREE_FALL, 0b00011011);  // 00110 011
+
+  if (error) {
+    Serial.println("Problem configuring the device.");
+  } else {
+    Serial.println("Device O.K.");
+  }
 }
 
-void loop(){
-  Serial.println("---");
 
-  //Serial.println("Playing..."); 
-  //sfx.playTrack(1);
-  //sfx.playTrack("T00     OGG");
+/* Reads from the LSM6DS3_ACC_GYRO_WAKE_UP_SRC register 
+   in order to "reset" the free fall trigger */
+void resetFreeFallTrigger() {
+  Serial.println("Resetting free-fall trigger");
+  uint8_t readDataByte = 0;
+  myIMU.readRegister(&readDataByte, LSM6DS3_ACC_GYRO_WAKE_UP_SRC);
+}
 
-  /*Serial.println("---IMU---");
 
-    //Accelerometer
-    Serial.print("\nAccelerometer:\n");
-    Serial.print(" X1 = ");
-    Serial.println(myIMU.readFloatAccelX(), 4);
-    Serial.print(" Y1 = ");
-    Serial.println(myIMU.readFloatAccelY(), 4);
-    Serial.print(" Z1 = ");
-    Serial.println(myIMU.readFloatAccelZ(), 4);
-  */
+/* Function that gets called once the interrupt for free-fall ist triggered
+   The device was thrown, now estimate on which side.
+    
+   NOTE: I set only a flag instead of executing code.
+   This is because (I need to understand why) the interrupt
+   function is only running for a short period of time.
+   I suspect only while the interrupt is triggered or so.
+   Thus, if you execute longer code here it just won't get
+   executed after some millis.
+   With the flag being set, we can use this in the loop afterwards. */
+void onFreefallDetected() {
+  Serial.println("Interrupt received!");
+  wasThrown = true;
+}
 
-  if(stabilize(250, 3000)) {
+
+/** This is waiting for the device to stabilize so it can estimate the side it fell on.
+    Then it notifies the user */
+void estimateSideAndNotify() {
+  Serial.println("Waiting to stabilize");
+
+  if (stabilize()) {
     uint8_t f = getFace();
-  
-    /*if(f == 2) {              // If '3' face
-      if(!random(10)) {       // 1-in-10 chance of...
-        f = 30;               // Alternate 'face 3' track
-      }                       // LOL
-    }*/
-  
-    //Serial.println("Anouncement!");
-    //play(20 + random(3));     // One of 3 random announcements
-
-  
     Serial.print("Audio Index: ");
-    Serial.print(f);   
+    Serial.print(f);
     Serial.print(" Face: ");
-    Serial.println(f+1); 
-    play(f);                  // Face #
-  
-    if(f != 30) {             // If not the alt face...
-      if(f <= 3) {            // 0-3 (1-4) = bad
-        play(23 + random(3)); // Random jab
-      } else if(f >= 16) {    // 16-19 (17-20) = good
-        play(26 + random(3)); // Random praise
+    Serial.println(f + 1);
+    play(f);  // Face #
+
+    if (f != 30) {             // If not the alt face...
+      if (f <= 3) {            // 0-3 (1-4) = bad
+        play(23 + random(3));  // Random jab
+      } else if (f >= 16) {    // 16-19 (17-20) = good
+        play(26 + random(3));  // Random praise
       }
     }
-  
+
     // Estimate voltage from battery, report if low.
     // This is "ish" and may need work.
-    if((readVoltage() < 3000) && !(batt++ & 1)) { // Annc on every 2nd roll
+    if ((readVoltage() < 3000) && !(batt++ & 1)) {  // Annc on every 2nd roll
       delay(500);
       play(31 + random(2));
     }
   }
+}
 
-  delay(3000);
+
+// ---------------- SETUP & LOOP ----------------
+
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial) { ; }
+  Serial.println("\nSTART PROGRAM");
+
+  //setupAudio();
+  setupIMU();
+}
+
+
+void loop() {
+  //Serial.print("."); // Health check
+  
+  // Semaphore so we don't trigger it multiple times
+  if (wasThrown && !calculatingResult) {
+    calculatingResult = true;
+    estimateSideAndNotify();
+    resetFreeFallTrigger();
+    calculatingResult = false;
+    wasThrown = false;
+  }
+  delay(1000);
+}
+
+/** For now turn off (and restart)
+    
+    TODO: I don't know how to enable the gyro again so we will try things like that.
+*/
+void goToPowerOff() {
+  //setLedRGB(false, false, false);
+  Serial.println("Going to System OFF");
+  setupFreeFallInterrupt();  // not needed here, if already applied..
+  delay(100);                // delay seems important to apply settings, before going to System OFF
+  //Ensure interrupt pin from IMU is set to wake up device
+  nrf_gpio_cfg_sense_input(digitalPinToInterrupt(int1Pin), NRF_GPIO_PIN_PULLDOWN, NRF_GPIO_PIN_SENSE_HIGH);
+  // Trigger System OFF
+  NRF_POWER->SYSTEMOFF = 1;
 }
